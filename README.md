@@ -16,6 +16,6 @@ Thought. The idea is not to have state in the service. The work needs to be part
 Every service is just reading it's assigned presence tasks, and execute these and put the results on the event bus. 
 **Question** Do we like a callback or an eventing system? Eventing allows for other service to recover from failure, by replaying events.
 
-Other thought. Build the whole in a CQRS pattern. Incoming requests are in a command queue. Fetched by one of the running instances. Executes and send events as a result. The events are used to build a model of the subscriptions, which is used by the Services to fetch Teams presence.
+Other thought. Build the whole in a `CQRS` pattern. Incoming requests are in a command queue. Fetched by one of the running instances. Executes and send events as a result. The events are used to build a model of the subscriptions, which is used by the Services to fetch Teams presence.
 
 Important, try to prevent the need for context or call it a session.
