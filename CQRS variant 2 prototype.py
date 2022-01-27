@@ -1,8 +1,7 @@
 # CQRS variant 2 prototype
-from concurrent.futures import CancelledError
+from random import randint
 import string
 import asyncio
-from typing import Dict, List
 from dotmap import DotMap
 
 
@@ -16,6 +15,7 @@ class EventStore:
         self.subscribers.append(subscriber)
 
     def postEvent(self, data):
+        print(f'EventStore event: {data} stored')
         self.store.append(data)
         for subscriber in self.subscribers:
             subscriber.update(data)
@@ -40,7 +40,7 @@ class SubscriptionReadModel:
     # Registers subscribers per tenant
 
     def __init__(self) -> None:
-        self.model = dict()
+        self.model = {}
 
     def update(self, event):
         # Add empty set if tenant is not known
@@ -91,7 +91,17 @@ class CommandProcessor:
             while True:
                 cmd = await self.cmdQueue.get()
                 print(f'{self.__class__.__name__} fetched command: {cmd}')
-                self.eventStore.postEvent(cmd)
+
+                # here we are getting the Teams presence from MS Graph
+                if cmd.operation == 'fetch_presence':
+                    for subscription in cmd.subscriptions:
+                        presence = ['offline', 'online',
+                                    'away', 'busy'][randint(0,3)]
+                        event = DotMap({'operation': 'presence', 'tenantId': cmd.tenantId,
+                               'sipUri': subscription, 'presence': presence})
+                        self.eventStore.postEvent(event)
+                else:
+                    self.eventStore.postEvent(cmd)
         except asyncio.CancelledError:
             print(f'{self.__class__.__name__} command processing task graceful ended')
 
@@ -148,7 +158,7 @@ class PresenceDemo:
         self.taskList = [
             asyncio.create_task(self.cmdProcessor.task()),
             asyncio.create_task(self.presenceRequestCommandGenerator.task())]
-        
+
     async def stop(self):
         for task in self.taskList:
             task.cancel()
@@ -162,9 +172,8 @@ async def main():
 
     await asyncio.sleep(1)
     await pd.API.AddPresenceSubscription('tenant_a', 'sip:agent@nu.nl')
-    await asyncio.sleep(12)
+    await asyncio.sleep(20)
 
-    
     await pd.stop()
 
 asyncio.run(main())
