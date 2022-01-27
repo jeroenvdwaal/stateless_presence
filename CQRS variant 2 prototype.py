@@ -1,8 +1,9 @@
 # CQRS variant 2 prototype
+from concurrent.futures import CancelledError
 import string
 import asyncio
+from typing import Dict, List
 from dotmap import DotMap
-
 
 
 class EventStore:
@@ -19,6 +20,7 @@ class EventStore:
         for subscriber in self.subscribers:
             subscriber.update(data)
 
+
 class CommandQueue:
     def __init__(self) -> None:
         self.queue = asyncio.Queue()
@@ -32,10 +34,11 @@ class CommandQueue:
         print(f'Command {cmd} fetched from CommandQueue')
         return cmd
 
-class SubscriberReadModel:
+
+class SubscriptionReadModel:
     # Read only model build from EventStore events
     # Registers subscribers per tenant
-    
+
     def __init__(self) -> None:
         self.model = dict()
 
@@ -46,18 +49,35 @@ class SubscriberReadModel:
 
         if event.operation == 'add':
             if event.sipUri not in self.model[event.tenantId]:
-                self.model[event.tenantId].append(event.sipUri)    
+                self.model[event.tenantId].append(event.sipUri)
                 print(f'Event: {event} processed current model: {self.model}')
 
         if event.operation == 'remove':
             if event.sipUri in self.model[event.tenantId]:
-                self.model[event.tenantId].remove(event.sipUri)    
+                self.model[event.tenantId].remove(event.sipUri)
                 print(f'Event: {event} processed current model: {self.model}')
-        
+
+
 class PresenceRequestCommandGenerator:
-    def __init__(self, cmdQueue: CommandQueue, subscriberReadModel: SubscriberReadModel) -> None:
+    # Generates fetch request, based on the subscription read model
+    def __init__(self, cmdQueue: CommandQueue, subscriptionReadModel: SubscriptionReadModel) -> None:
         self.cmdQueue = cmdQueue
-        self.subscriberReadModel = subscriberReadModel
+        self.subscriptionReadModel = subscriptionReadModel
+
+    async def task(self):
+        # read periodically the subscription read model to generate presence fetch commands
+        # this should be a smart schedule that allows for scaling
+        try:
+            while True:
+                await asyncio.sleep(10)
+                model = self.subscriptionReadModel
+                for tenantId, subscriptions in model:
+                    cmd = DotMap({'operation': 'fetch_presence',
+                                 'tenantId': tenantId, 'subscriptions': subscriptions})
+                    await self.cmdQueue.put(cmd)
+
+        except asyncio.CancelledError:
+            print('PresenceRequestCommandGenerator ended gracefully')
 
 
 class CommandProcessor:
@@ -65,10 +85,7 @@ class CommandProcessor:
         self.cmdQueue = cmdQueue
         self.eventStore = eventStore
 
-    def start(self):
-        return asyncio.create_task(self.__task())
-
-    async def __task(self):
+    async def task(self):
         print('Command processing started')
         try:
             while True:
@@ -80,39 +97,74 @@ class CommandProcessor:
 
 
 class API:
-    def __init__(self, cmdQueue: CommandQueue) -> None:
+    def __init__(self, cmdQueue: CommandQueue, supscriptionReadModel: SubscriptionReadModel) -> None:
         self.cmdQueue = cmdQueue
+        self.subscriptionReadModel = supscriptionReadModel
 
     # Post the operations of the API as commands in the queue
     # Processing will take place down the pipeline.
     async def AddPresenceSubscription(self, tenantId: string, sipUri: string):
-        cmd = DotMap({'operation': 'add', 'tenantId': tenantId, 'sipUri': sipUri})
+        cmd = DotMap(
+            {'operation': 'add', 'tenantId': tenantId, 'sipUri': sipUri})
         await self.cmdQueue.put(cmd)
 
     async def RemovePresenceSubscription(self, tenantId: string, sipUri: string):
-        cmd = DotMap({'operation': 'remove', 'tenantId': tenantId, 'sipUri': sipUri})
+        cmd = DotMap(
+            {'operation': 'remove', 'tenantId': tenantId, 'sipUri': sipUri})
         await self.cmdQueue.put(cmd)
+
+    # Queries are taken from the read models
+    def Subscriptions(self, tenantId: string):
+        try:
+            return self.subscriptionReadModel.model[tenantId]
+        except:
+            return []
+
+    def Subscriptions(self):
+        return self.subscriptionReadModel.model
+
+    def Tenants(self):
+        return self.subscriptionReadModel.model.keys
 
 
 class PresenceDemo:
     def __init__(self) -> None:
         self.cmdQueue = CommandQueue()
-        self.API = API(self.cmdQueue)
         self.eventStore = EventStore()
         self.cmdProcessor = CommandProcessor(self.cmdQueue, self.eventStore)
-        
+
         # ReadModels
-        self.subscriberReadModel = SubscriberReadModel()
-        self.eventStore.addSubscriber(self.subscriberReadModel)
+        self.subscriptionReadModel = SubscriptionReadModel()
+        self.eventStore.addSubscriber(self.subscriptionReadModel)
+
+        # API depends on ReadModels
+        self.API = API(self.cmdQueue, self.subscriptionReadModel)
+
+        # Fetch presence command generator
+        self.presenceRequestCommandGenerator = PresenceRequestCommandGenerator(
+            self.cmdQueue, self.subscriptionReadModel)
+
+    def start(self):
+        self.taskList = [
+            asyncio.create_task(self.cmdProcessor.task()),
+            asyncio.create_task(self.presenceRequestCommandGenerator.task())]
+        
+    async def stop(self):
+        for task in self.taskList:
+            task.cancel()
+            await task
+        print('Demo ended gracefully')
 
 
 async def main():
     pd = PresenceDemo()
-    cmdProcessorTask = pd.cmdProcessor.start()
+    pd.start()
+
     await asyncio.sleep(1)
     await pd.API.AddPresenceSubscription('tenant_a', 'sip:agent@nu.nl')
     await asyncio.sleep(2)
-    cmdProcessorTask.cancel()
-    await cmdProcessorTask
+
+    
+    await pd.stop()
 
 asyncio.run(main())
