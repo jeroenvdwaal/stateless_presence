@@ -69,11 +69,11 @@ class PresenceRequestCommandGenerator:
         # this should be a smart schedule that allows for scaling
         try:
             while True:
-                await asyncio.sleep(10)
-                model = self.subscriptionReadModel
-                for tenantId, subscriptions in model:
+                await asyncio.sleep(3)
+                model = self.subscriptionReadModel.model
+                for tenantId in model:
                     cmd = DotMap({'operation': 'fetch_presence',
-                                 'tenantId': tenantId, 'subscriptions': subscriptions})
+                                 'tenantId': tenantId, 'subscriptions': model[tenantId]})
                     await self.cmdQueue.put(cmd)
 
         except asyncio.CancelledError:
@@ -162,7 +162,7 @@ async def main():
 
     await asyncio.sleep(1)
     await pd.API.AddPresenceSubscription('tenant_a', 'sip:agent@nu.nl')
-    await asyncio.sleep(2)
+    await asyncio.sleep(12)
 
     
     await pd.stop()
