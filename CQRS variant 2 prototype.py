@@ -1,7 +1,4 @@
 # CQRS variant 2 prototype
-
-import cmd
-from pprint import pprint
 import string
 import asyncio
 from dotmap import DotMap
@@ -22,8 +19,23 @@ class EventStore:
         for subscriber in self.subscribers:
             subscriber.update(data)
 
+class CommandQueue:
+    def __init__(self) -> None:
+        self.queue = asyncio.Queue()
+
+    async def put(self, cmd):
+        print(f'Command {cmd} put in CommandQueue')
+        await self.queue.put(cmd)
+
+    async def get(self):
+        cmd = await self.queue.get()
+        print(f'Command {cmd} fetched from CommandQueue')
+        return cmd
+
 class SubscriberReadModel:
     # Read only model build from EventStore events
+    # Registers subscribers per tenant
+    
     def __init__(self) -> None:
         self.model = dict()
 
@@ -35,10 +47,21 @@ class SubscriberReadModel:
         if event.operation == 'add':
             if event.sipUri not in self.model[event.tenantId]:
                 self.model[event.tenantId].append(event.sipUri)    
-                pprint(f'Model updated: {self.model}')
+                print(f'Event: {event} processed current model: {self.model}')
+
+        if event.operation == 'remove':
+            if event.sipUri in self.model[event.tenantId]:
+                self.model[event.tenantId].remove(event.sipUri)    
+                print(f'Event: {event} processed current model: {self.model}')
+        
+class PresenceRequestCommandGenerator:
+    def __init__(self, cmdQueue: CommandQueue, subscriberReadModel: SubscriberReadModel) -> None:
+        self.cmdQueue = cmdQueue
+        self.subscriberReadModel = subscriberReadModel
+
 
 class CommandProcessor:
-    def __init__(self, cmdQueue: asyncio.Queue, eventStore: EventStore) -> None:
+    def __init__(self, cmdQueue: CommandQueue, eventStore: EventStore) -> None:
         self.cmdQueue = cmdQueue
         self.eventStore = eventStore
 
@@ -50,15 +73,14 @@ class CommandProcessor:
         try:
             while True:
                 cmd = await self.cmdQueue.get()
-                print(f'Command received, data: {cmd}')
+                print(f'{self.__class__.__name__} fetched command: {cmd}')
                 self.eventStore.postEvent(cmd)
         except asyncio.CancelledError:
-            print('Command processing task graceful ended')
+            print(f'{self.__class__.__name__} command processing task graceful ended')
 
 
 class API:
-
-    def __init__(self, cmdQueue: asyncio.Queue) -> None:
+    def __init__(self, cmdQueue: CommandQueue) -> None:
         self.cmdQueue = cmdQueue
 
     # Post the operations of the API as commands in the queue
@@ -74,7 +96,7 @@ class API:
 
 class PresenceDemo:
     def __init__(self) -> None:
-        self.cmdQueue = asyncio.Queue()
+        self.cmdQueue = CommandQueue()
         self.API = API(self.cmdQueue)
         self.eventStore = EventStore()
         self.cmdProcessor = CommandProcessor(self.cmdQueue, self.eventStore)
