@@ -19,3 +19,13 @@ Every service is just reading it's assigned presence tasks, and execute these an
 Other thought. Build the whole in a `CQRS` pattern. Incoming requests are in a command queue. Fetched by one of the running instances. Executes and send events as a result. The events are used to build a model of the subscriptions, which is used by the Services to fetch Teams presence.
 
 Important, try to prevent the need for context or call it a session.
+
+
+## CQRS approach
+
+See drawing. An alternative to the drawing.
+
+Use command queue, to add or remove agent registration for presence. Create read models from these operations. We now need to fetch the actual presence from Teams. Instead of doing this by a separate process, the actual fetch is turned into a command, which is enqueued in the command queue. These events are processed by an entities, which is doing the actual Teams Graph API call. The result are again events, which are processed to a read model with the latest presence and possibly forwarded to an event bus. 
+
+Restart of the module, is re-reading the events, which brings the read model for presence and the subscriptions back to what it was.
+
