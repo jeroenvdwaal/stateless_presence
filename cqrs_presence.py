@@ -4,21 +4,31 @@ import string
 import asyncio
 from dotmap import DotMap
 
+# Classes that represents resources
+
+class BaseReadModel:
+    def __init__(self) -> None:
+        self.model = {}
+
+    def update(self, event):
+        # Notify inheritor to implement this method
+        raise NotImplementedError("Please implement this method")
+
 
 class EventStore:
     # Simple observer model represents the event store.
     def __init__(self) -> None:
         self.store = []
-        self.subscribers = []
+        self.readModels = []
 
-    def addSubscriber(self, subscriber):
-        self.subscribers.append(subscriber)
+    def addModel(self, readModel: BaseReadModel):
+        self.readModels.append(readModel)
 
-    def postEvent(self, data):
-        print(f'EventStore event: {data} stored')
-        self.store.append(data)
-        for subscriber in self.subscribers:
-            subscriber.update(data)
+    def postEvent(self, event):
+        print(f'EventStore event: {event} stored')
+        self.store.append(event)
+        for subscriber in self.readModels:
+            subscriber.update(event)
 
 
 class CommandQueue:
@@ -34,13 +44,14 @@ class CommandQueue:
         print(f'Command {cmd} fetched from CommandQueue')
         return cmd
 
+# Application classes
 
-class SubscriptionReadModel:
+class SubscriptionReadModel(BaseReadModel):
     # Read only model build from EventStore events
     # Registers subscribers per tenant
 
     def __init__(self) -> None:
-        self.model = {}
+        super().__init__()
 
     def update(self, event):
         # Add empty set if tenant is not known
@@ -96,9 +107,9 @@ class CommandProcessor:
                 if cmd.operation == 'fetch_presence':
                     for subscription in cmd.subscriptions:
                         presence = ['offline', 'online',
-                                    'away', 'busy'][randint(0,3)]
+                                    'away', 'busy'][randint(0, 3)]
                         event = DotMap({'operation': 'presence', 'tenantId': cmd.tenantId,
-                               'sipUri': subscription, 'presence': presence})
+                                        'sipUri': subscription, 'presence': presence})
                         self.eventStore.postEvent(event)
                 else:
                     self.eventStore.postEvent(cmd)
@@ -113,12 +124,12 @@ class API:
 
     # Post the operations of the API as commands in the queue
     # Processing will take place down the pipeline.
-    async def AddPresenceSubscription(self, tenantId: string, sipUri: string):
+    async def AddPresenceSubscription(self, tenantId: str, sipUri: str):
         cmd = DotMap(
             {'operation': 'add', 'tenantId': tenantId, 'sipUri': sipUri})
         await self.cmdQueue.put(cmd)
 
-    async def RemovePresenceSubscription(self, tenantId: string, sipUri: string):
+    async def RemovePresenceSubscription(self, tenantId: str, sipUri: str):
         cmd = DotMap(
             {'operation': 'remove', 'tenantId': tenantId, 'sipUri': sipUri})
         await self.cmdQueue.put(cmd)
@@ -145,7 +156,7 @@ class PresenceDemo:
 
         # ReadModels
         self.subscriptionReadModel = SubscriptionReadModel()
-        self.eventStore.addSubscriber(self.subscriptionReadModel)
+        self.eventStore.addModel(self.subscriptionReadModel)
 
         # API depends on ReadModels
         self.API = API(self.cmdQueue, self.subscriptionReadModel)
@@ -172,7 +183,9 @@ async def main():
 
     await asyncio.sleep(1)
     await pd.API.AddPresenceSubscription('tenant_a', 'sip:agent@nu.nl')
-    await asyncio.sleep(20)
+    await asyncio.sleep(5)
+    await pd.API.RemovePresenceSubscription('tenant_a', 'sip:agent@nu.nl')
+    await asyncio.sleep(5)
 
     await pd.stop()
 
