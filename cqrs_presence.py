@@ -1,10 +1,11 @@
 # CQRS variant 2 prototype
 from random import randint
-import string
 import asyncio
 from dotmap import DotMap
+import logging
 
 # Classes that represents resources
+
 
 class BaseReadModel:
     def __init__(self) -> None:
@@ -18,6 +19,7 @@ class BaseReadModel:
 class EventStore:
     # Simple observer model represents the event store.
     def __init__(self) -> None:
+        self.logger = logging.getLogger(self.__class__.__name__)
         self.store = []
         self.readModels = []
 
@@ -25,7 +27,7 @@ class EventStore:
         self.readModels.append(readModel)
 
     def postEvent(self, event):
-        print(f'EventStore event: {event} stored')
+        self.logger.info(f'Event \'{event}\' stored')
         self.store.append(event)
         for subscriber in self.readModels:
             subscriber.update(event)
@@ -33,18 +35,20 @@ class EventStore:
 
 class CommandQueue:
     def __init__(self) -> None:
+        self.logger = logging.getLogger(self.__class__.__name__)
         self.queue = asyncio.Queue()
 
     async def put(self, cmd):
-        print(f'Command {cmd} put in CommandQueue')
+        self.logger.info(f'Command \'{cmd}\' added to queue')
         await self.queue.put(cmd)
 
     async def get(self):
         cmd = await self.queue.get()
-        print(f'Command {cmd} fetched from CommandQueue')
+        self.logger.info(f'Command \'{cmd}\' fetched from queue')
         return cmd
 
 # Application classes
+
 
 class SubscriptionReadModel(BaseReadModel):
     # Read only model build from EventStore events
@@ -52,6 +56,7 @@ class SubscriptionReadModel(BaseReadModel):
 
     def __init__(self) -> None:
         super().__init__()
+        self.logger = logging.getLogger(self.__class__.__name__)
 
     def update(self, event):
         # Add empty set if tenant is not known
@@ -61,17 +66,20 @@ class SubscriptionReadModel(BaseReadModel):
         if event.operation == 'add':
             if event.sipUri not in self.model[event.tenantId]:
                 self.model[event.tenantId].append(event.sipUri)
-                print(f'Event: {event} processed current model: {self.model}')
+                self.logger.info(
+                    f'Event: {event} processed current model: {self.model}')
 
         if event.operation == 'remove':
             if event.sipUri in self.model[event.tenantId]:
                 self.model[event.tenantId].remove(event.sipUri)
-                print(f'Event: {event} processed current model: {self.model}')
+                self.logger.info(
+                    f'Event: {event} processed current model: {self.model}')
 
 
 class PresenceRequestCommandGenerator:
     # Generates fetch request, based on the subscription read model
     def __init__(self, cmdQueue: CommandQueue, subscriptionReadModel: SubscriptionReadModel) -> None:
+        self.logger = logging.getLogger(self.__class__.__name__)
         self.cmdQueue = cmdQueue
         self.subscriptionReadModel = subscriptionReadModel
 
@@ -88,20 +96,23 @@ class PresenceRequestCommandGenerator:
                     await self.cmdQueue.put(cmd)
 
         except asyncio.CancelledError:
-            print('PresenceRequestCommandGenerator ended gracefully')
+            self.logger.info(
+                'Ended gracefully')
 
 
 class CommandProcessor:
     def __init__(self, cmdQueue: CommandQueue, eventStore: EventStore) -> None:
+        self.logger = logging.getLogger(self.__class__.__name__)
         self.cmdQueue = cmdQueue
         self.eventStore = eventStore
 
     async def task(self):
-        print('Command processing started')
+        self.logger.info('Processing started')
         try:
             while True:
                 cmd = await self.cmdQueue.get()
-                print(f'{self.__class__.__name__} fetched command: {cmd}')
+                self.logger.info(
+                    f'Fetched command: {cmd}')
 
                 # here we are getting the Teams presence from MS Graph
                 if cmd.operation == 'fetch_presence':
@@ -114,7 +125,8 @@ class CommandProcessor:
                 else:
                     self.eventStore.postEvent(cmd)
         except asyncio.CancelledError:
-            print(f'{self.__class__.__name__} command processing task graceful ended')
+            self.logger.info(
+                f'Ended gracefully')
 
 
 class API:
@@ -135,7 +147,7 @@ class API:
         await self.cmdQueue.put(cmd)
 
     # Queries are taken from the read models
-    def Subscriptions(self, tenantId: string):
+    def Subscriptions(self, tenantId: str):
         try:
             return self.subscriptionReadModel.model[tenantId]
         except:
@@ -150,6 +162,7 @@ class API:
 
 class PresenceDemo:
     def __init__(self) -> None:
+        self.logger = logging.getLogger(self.__class__.__name__)
         self.cmdQueue = CommandQueue()
         self.eventStore = EventStore()
         self.cmdProcessor = CommandProcessor(self.cmdQueue, self.eventStore)
@@ -174,7 +187,7 @@ class PresenceDemo:
         for task in self.taskList:
             task.cancel()
             await task
-        print('Demo ended gracefully')
+        self.logger.info('Demo ended gracefully')
 
 
 async def main():
@@ -189,4 +202,7 @@ async def main():
 
     await pd.stop()
 
+
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s %(levelname)s [%(name)s] %(message)s')
 asyncio.run(main())
