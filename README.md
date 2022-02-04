@@ -1,6 +1,6 @@
 # Presence service
 
-Project to investigate how to create a stateless approach for a load balancing Presence Service.
+Project to investigate how to create a stateless approach for a load balancing Presence Service. This could help extending the PC Saas service framework with scaling services.
 
 Presence registration and de-registration could be done from within a `REST API`, which allows a load balancer to forward to any of the running services. This allows for easy scaling up and scaling down. The response of the service is only returned in case the service has successfully processed the API call. If not processed in a particular time-span, the request can be send to another service. 
 
@@ -20,7 +20,6 @@ Other thought. Build the whole in a `CQRS` pattern. Incoming requests are in a c
 
 Important, try to prevent the need for context or call it a session.
 
-
 ## CQRS approach
 
 See drawing. An alternative to the drawing.
@@ -28,4 +27,19 @@ See drawing. An alternative to the drawing.
 Use command queue, to add or remove agent registration for presence. Create read models from these operations. We now need to fetch the actual presence from Teams. Instead of doing this by a separate process, the actual fetch is turned into a command, which is enqueued in the command queue. These events are processed by an entities, which is doing the actual Teams Graph API call. The result are again events, which are processed to a read model with the latest presence and possibly forwarded to an event bus. 
 
 Restart of the module, is re-reading the events, which brings the read model for presence and the subscriptions back to what it was.
+
+## Load balancer approach
+
+The best approach would be a stateless setup as well. Could we setup a design that adhere to this? We could use distributed databases, caches and queues in the design to prevent state in the services.
+
+Type of balancers:
+
+- round robin routing
+- specific routing
+  - based on message inspection
+  - session routing
+  - hashes
+  - more ...
+
+
 
