@@ -60,10 +60,10 @@ class SubscriptionReadModel(BaseReadModel):
 
     def update(self, event):
         # Add empty set if tenant is not known
-        if event.tenantId not in self.model:
-            self.model[event.tenantId] = []
-
         if event.operation == 'add':
+            if event.tenantId not in self.model:
+                self.model[event.tenantId] = []
+
             if event.sipUri not in self.model[event.tenantId]:
                 self.model[event.tenantId].append(event.sipUri)
                 self.logger.info(
@@ -72,8 +72,13 @@ class SubscriptionReadModel(BaseReadModel):
         if event.operation == 'remove':
             if event.sipUri in self.model[event.tenantId]:
                 self.model[event.tenantId].remove(event.sipUri)
+
+                if len(self.model[event.tenantId]) == 0:
+                    del self.model[event.tenantId]
+                    
                 self.logger.info(
                     f'Event: {event} processed current model: {self.model}')
+
 
 
 class PresenceRequestCommandGenerator:
